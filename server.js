@@ -223,6 +223,135 @@ async function registerOrderWebhook() {
   }
   console.log("✅ Webhook orders/create registrato con successo su Shopify");
 }
+// ===== SECONDA EMAIL: INVIATA QUANDO SHOPIFY SEGNA L'ORDINE COME PAGATO =====
+app.post(
+  "/webhook/shopify/order-paid",
+  express.raw({ type: "application/json" }),
+  async (req, res) => {
+    if (!verifyShopifyWebhook(req)) {
+      console.error("❌ Webhook pagamento non autentico, scartato");
+      return res.status(401).send("Invalid signature");
+    }
+    res.status(200).send("ok");
+
+    let order;
+    try {
+      order = JSON.parse(req.body.toString("utf8"));
+    } catch (err) {
+      console.error("❌ Impossibile leggere l'ordine pagato:", err.message);
+      return;
+    }
+
+    const customerEmail = order.email || order.contact_email;
+    const customerName = order.customer?.first_name || "";
+    const orderName = order.name;
+
+    if (!customerEmail) {
+      console.warn(`⚠️ Ordine ${orderName} pagato ma senza email cliente`);
+      return;
+    }
+
+    console.log(`💳 Ordine pagato: ${orderName} per ${customerEmail}`);
+
+    try {
+      await sendPaymentConfirmedEmail({ to: customerEmail, name: customerName, orderName });
+      console.log(`✉️ Email conferma pagamento inviata a ${customerEmail}`);
+    } catch (err) {
+      console.error("❌ Errore nell'invio dell'email di pagamento:", err.message);
+    }
+  }
+);
+
+async function sendPaymentConfirmedEmail({ to, name, orderName }) {
+  const greeting = name ? `Ciao ${name}` : "Ciao";
+
+  const html = `
+      <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; color: #1a1a1a;">
+        <div style="background-color: #d4ff3f; text-align: center; padding: 24px;">
+          <strong style="font-size: 20px;">⚽ L'OUTFIT DEL CALCIO</strong>
+        </div>
+        <h1 style="text-align: center; font-size: 28px; margin-top: 32px;">⚽ Grazie per il tuo ordine!</h1>
+        <p style="text-align: center;">${greeting},</p>
+        <p style="text-align: center;">
+          Grazie di cuore per il tuo ordine <strong>${orderName}</strong>!
+        </p>
+        <p style="text-align: center;">
+          Il tuo pacco è già in lavorazione e presto sarà in viaggio verso di te.
+        </p>
+
+        <h3 style="text-align: center; margin-top: 32px;">📲 Unisciti al nostro canale Telegram</h3>
+        <p style="text-align: center;">
+          Ricevi novità e codici sconto esclusivi. Iscrivendoti ricevi subito il <strong>20% di sconto</strong>
+          sul prossimo ordine con il codice <strong>TELEGRAM20</strong>.
+        </p>
+        <div style="text-align: center; margin: 24px 0;">
+          <a href="https://t.me/+R-i_B3XKj6Q4ZTE0" style="background-color: #d4ff3f; color: #000; padding: 14px 28px; text-decoration: none; font-weight: bold; border-radius: 6px; display: inline-block;">
+            Entra nel canale Telegram
+          </a>
+        </div>
+
+        <h3 style="text-align: center; margin-top: 32px;">⭐ Lascia una recensione</h3>
+        <p style="text-align: center;">
+          Quando il tuo ordine arriva, raccontaci cosa ne pensi e ricevi un ulteriore codice sconto.
+        </p>
+        <div style="text-align: center; margin: 24px 0;">
+          <a href="https://outfitdelcalcio.com/?utm_source=email&utm_medium=transazionale&utm_campaign=recensione" style="background-color: #d4ff3f; color: #000; padding: 14px 28px; text-decoration: none; font-weight: bold; border-radius: 6px; display: inline-block;">
+            Lascia una recensione
+          </a>
+        </div>
+
+        <p style="text-align: center; margin-top: 32px;">
+          A presto in campo,<br/>Il team di ${SENDER_NAME}
+        </p>
+      </div>
+    `;
+
+  const response = await fetch("https://api.resend.com/emails", {
+    method: "POST",
+    headers: { Authorization: `Bearer ${RESEND_API_KEY}`, "Content-Type": "application/json" },
+    body: JSON.stringify({
+      from: `${SENDER_NAME} <${SENDER_EMAIL}>`,
+      to: [to],
+      subject: `⚽ Grazie per il tuo ordine ${orderName}!`,
+      html,
+    }),
+  });
+
+  if (!response.ok) {
+    const errText = await response.text();
+    throw new Error(`Resend ha rifiutato l'invio: ${errText}`);
+  }
+  return response.json();
+}
+
+async function registerPaidOrderWebhook() {
+  const accessToken = await getShopifyAccessToken();
+  const callbackUrl = `${OUR_SERVER_URL}/webhook/shopify/order-paid`;
+  const listUrl = `https://${SHOPIFY_STORE}/admin/api/${SHOPIFY_API_VERSION}/webhooks.json`;
+  const listResp = await fetch(listUrl, { headers: { "X-Shopify-Access-Token": accessToken } });
+  const listData = await listResp.json();
+
+  const alreadyExists = (listData.webhooks || []).some(
+    (w) => w.topic === "orders/paid" && w.address === callbackUrl
+  );
+  if (alreadyExists) {
+    console.log("ℹ️ Webhook orders/paid già registrato, nessuna azione necessaria");
+    return;
+  }
+
+  const createResp = await fetch(listUrl, {
+    method: "POST",
+    headers: { "X-Shopify-Access-Token": accessToken, "Content-Type": "application/json" },
+    body: JSON.stringify({ webhook: { topic: "orders/paid", address: callbackUrl, format: "json" } }),
+  });
+
+  if (!createResp.ok) {
+    const errText = await createResp.text();
+    console.error("❌ Errore nella registrazione del webhook orders/paid:", errText);
+    return;
+  }
+  console.log("✅ Webhook orders/paid registrato con successo su Shopify");
+}
 
 async function findUnpaidShopifyOrderByEmail(email) {
   const accessToken = await getShopifyAccessToken();
@@ -258,5 +387,8 @@ app.listen(PORT, () => {
   console.log(`Server avviato sulla porta ${PORT}`);
   registerOrderWebhook().catch((err) =>
     console.error("❌ Errore nella registrazione automatica del webhook:", err.message)
+  );
+  registerPaidOrderWebhook().catch((err) =>
+    console.error("❌ Errore nella registrazione del webhook orders/paid:", err.message)
   );
 });
