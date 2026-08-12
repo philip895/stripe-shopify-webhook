@@ -382,6 +382,118 @@ async function markShopifyOrderAsPaid(orderId) {
   return response.json();
 }
 
+// ===== PAGAMENTI PAYPAL: SEGNA L'ORDINE COME PAGATO SU SHOPIFY =====
+
+const PAYPAL_CLIENT_ID = process.env.PAYPAL_CLIENT_ID;
+const PAYPAL_CLIENT_SECRET = process.env.PAYPAL_CLIENT_SECRET;
+const PAYPAL_WEBHOOK_ID = process.env.PAYPAL_WEBHOOK_ID;
+const PAYPAL_API = "https://api-m.paypal.com";
+
+async function getPayPalAccessToken() {
+  const auth = Buffer.from(`${PAYPAL_CLIENT_ID}:${PAYPAL_CLIENT_SECRET}`).toString("base64");
+  const response = await fetch(`${PAYPAL_API}/v1/oauth2/token`, {
+    method: "POST",
+    headers: { Authorization: `Basic ${auth}`, "Content-Type": "application/x-www-form-urlencoded" },
+    body: "grant_type=client_credentials",
+  });
+  if (!response.ok) throw new Error(`Errore token PayPal: ${await response.text()}`);
+  const data = await response.json();
+  return data.access_token;
+}
+
+async function verifyPayPalWebhook(req, rawBody) {
+  const accessToken = await getPayPalAccessToken();
+  const response = await fetch(`${PAYPAL_API}/v1/notifications/verify-webhook-signature`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${accessToken}`, "Content-Type": "application/json" },
+    body: JSON.stringify({
+      auth_algo: req.get("paypal-auth-algo"),
+      cert_url: req.get("paypal-cert-url"),
+      transmission_id: req.get("paypal-transmission-id"),
+      transmission_sig: req.get("paypal-transmission-sig"),
+      transmission_time: req.get("paypal-transmission-time"),
+      webhook_id: PAYPAL_WEBHOOK_ID,
+      webhook_event: JSON.parse(rawBody.toString("utf8")),
+    }),
+  });
+  const data = await response.json();
+  return data.verification_status === "SUCCESS";
+}
+
+async function findPendingOrdersByAmount(amount, currency) {
+  const accessToken = await getShopifyAccessToken();
+  const since = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+  const url = `https://${SHOPIFY_STORE}/admin/api/${SHOPIFY_API_VERSION}/orders.json?financial_status=pending&status=any&created_at_min=${encodeURIComponent(since)}&limit=250`;
+  const response = await fetch(url, { headers: { "X-Shopify-Access-Token": accessToken } });
+  if (!response.ok) throw new Error(`Errore ricerca ordini: ${response.status}`);
+  const data = await response.json();
+  return (data.orders || []).filter(
+    (o) => Number(o.total_price) === Number(amount) && o.currency === currency
+  );
+}
+
+async function avvisaPagamentoDaControllare({ amount, currency, payerEmail, candidati }) {
+  const elenco = candidati.length
+    ? candidati.map((o) => `<p>${o.name} — ${o.total_price} ${o.currency} — ${o.email || "senza email"}</p>`).join("")
+    : "<p>Nessun ordine in attesa con questo importo nelle ultime 24 ore.</p>";
+  await fetch("https://api.resend.com/emails", {
+    method: "POST",
+    headers: { Authorization: `Bearer ${RESEND_API_KEY}`, "Content-Type": "application/json" },
+    body: JSON.stringify({
+      from: `${SENDER_NAME} <${SENDER_EMAIL}>`,
+      to: [SENDER_EMAIL],
+      subject: `⚠️ Pagamento PayPal da abbinare a mano — ${amount} ${currency}`,
+      html: `
+        <p>È arrivato un pagamento PayPal che non sono riuscito ad abbinare con certezza.</p>
+        <p><strong>Importo:</strong> ${amount} ${currency}<br/>
+           <strong>Pagante:</strong> ${payerEmail || "non fornito"}</p>
+        <p><strong>Ordini in attesa con lo stesso importo:</strong></p>
+        ${elenco}
+        <p>Apri Shopify e segna a mano l'ordine corretto come pagato.</p>
+      `,
+    }),
+  });
+}
+
+app.post("/webhook/paypal", express.raw({ type: "application/json" }), async (req, res) => {
+  res.status(200).send("ok");
+
+  let evento;
+  try {
+    const valido = await verifyPayPalWebhook(req, req.body);
+    if (!valido) {
+      console.error("❌ Notifica PayPal non verificata, scartata");
+      return;
+    }
+    evento = JSON.parse(req.body.toString("utf8"));
+  } catch (err) {
+    console.error("❌ Errore nella verifica della notifica PayPal:", err.message);
+    return;
+  }
+
+  if (evento.event_type !== "PAYMENT.CAPTURE.COMPLETED") return;
+
+  const amount = evento.resource?.amount?.value;
+  const currency = evento.resource?.amount?.currency_code;
+  const payerEmail = evento.resource?.payer?.email_address || "";
+
+  console.log(`💶 Incasso PayPal: ${amount} ${currency} da ${payerEmail || "email non fornita"}`);
+
+  try {
+    const candidati = await findPendingOrdersByAmount(amount, currency);
+
+    if (candidati.length === 1) {
+      await markShopifyOrderAsPaid(candidati[0].id);
+      console.log(`💰 Ordine ${candidati[0].name} segnato come pagato via PayPal`);
+    } else {
+      console.warn(`⚠️ Abbinamento incerto: ${candidati.length} ordini con importo ${amount}`);
+      await avvisaPagamentoDaControllare({ amount, currency, payerEmail, candidati });
+    }
+  } catch (err) {
+    console.error("❌ Errore nell'abbinamento del pagamento PayPal:", err.message);
+  }
+});
+
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
   console.log(`Server avviato sulla porta ${PORT}`);
