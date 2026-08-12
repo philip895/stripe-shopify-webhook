@@ -146,21 +146,38 @@ app.post(
 
 async function sendThankYouEmail({ to, name, orderName }) {
   const greeting = name ? `Ciao ${name}` : "Ciao";
-  const html = `
-    <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; color: #1a1a1a;">
-      <h2>⚽ Grazie per il tuo ordine!</h2>
-      <p>${greeting},</p>
-      <p><strong>Grazie di cuore per il tuo ordine ${orderName || ""}!</strong></p>
-      <p>Il tuo pacco è già in lavorazione e presto sarà in viaggio verso di te.</p>
-      <hr style="margin: 24px 0;" />
-      <p><strong>📲 Unisciti al nostro canale Telegram</strong><br/>
-      Ricevi novità e codici sconto esclusivi. Iscrivendoti ricevi subito il 20% di sconto sul prossimo ordine con il codice <strong>TELEGRAM20</strong>.</p>
-      <hr style="margin: 24px 0;" />
-      <p><strong>⭐ Lascia una recensione</strong><br/>
-      Quando il tuo ordine arriva, raccontaci cosa ne pensi e ricevi un ulteriore codice sconto.</p>
-      <p style="margin-top: 32px;">A presto in campo,<br/>Il team di ${SENDER_NAME}</p>
-    </div>
-  `;
+ const html = `
+      <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; color: #1a1a1a;">
+        <div style="background-color: #d4ff3f; text-align: center; padding: 24px;">
+          <strong style="font-size: 20px;">⚽ L'OUTFIT DEL CALCIO</strong>
+        </div>
+        <h1 style="text-align: center; font-size: 28px; margin-top: 32px;">Ti diamo il benvenuto</h1>
+        <p style="text-align: center;">${greeting},</p>
+        <p style="text-align: center;">
+          Che tu stia cercando la maglia della tua squadra del cuore, un pezzo introvabile da vero collezionista,
+          o l'outfit perfetto per il prossimo grande torneo mondiale — qui trovi il tuo prossimo acquisto del cuore.
+        </p>
+        <p style="text-align: center; font-weight: bold;">
+          🔥 Le maglie che i nostri clienti si stanno letteralmente contendendo
+        </p>
+        <p style="text-align: center;">
+          Ogni settimana ne restano sempre meno in stock. Guarda cosa sta andando a ruba proprio ora.
+        </p>
+        <div style="text-align: center; margin: 24px 0;">
+          <a href="https://outfitdelcalcio.com/collections/nuovi-arrivi?utm_source=email&utm_medium=newsletter&utm_campaign=nuovi_arrivi" style="background-color: #d4ff3f; color: #000; padding: 14px 28px; text-decoration: none; font-weight: bold; border-radius: 6px; display: inline-block;">
+            Nuovi Arrivi
+          </a>
+        </div>
+        <h3 style="text-align: center;">Perché scegliere Outfit Del Calcio:</h3>
+        <p style="text-align: center;">⚽ Maglie delle squadre più amate</p>
+        <p style="text-align: center;">⚽ Qualità che senti addosso, non solo che vedi</p>
+        <p style="text-align: center;">⚽ Personalizzazione con nome e numero, come allo stadio</p>
+        <p style="text-align: center;">⚽ Spedizione veloce, resi senza stress</p>
+        <p style="text-align: center; margin-top: 32px;">
+          A presto in campo,<br/>Il team di ${SENDER_NAME}
+        </p>
+      </div>
+    `;
   const response = await fetch("https://api.resend.com/emails", {
     method: "POST",
     headers: { Authorization: `Bearer ${RESEND_API_KEY}`, "Content-Type": "application/json" },
