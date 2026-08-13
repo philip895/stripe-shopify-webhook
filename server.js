@@ -1,8 +1,8 @@
+
 // server.js
 // Webhook che collega Stripe a Shopify:
 // quando un pagamento su Stripe va a buon fine, cerca l'ordine Shopify
 // corrispondente (per email cliente) e lo segna automaticamente come pagato.
-
 const express = require("express");
 const Stripe = require("stripe");
 require("dotenv").config();
@@ -504,3 +504,78 @@ app.listen(PORT, () => {
     console.error("❌ Errore nella registrazione del webhook orders/paid:", err.message)
   );
 });
+
+// ===== RIEPILOGO GIORNALIERO ORDINI DA PRODURRE =====
+
+const RIEPILOGO_TOKEN = process.env.RIEPILOGO_TOKEN;
+
+async function getOrdiniDaProdurre() {
+  const accessToken = await getShopifyAccessToken();
+  const url = `https://${SHOPIFY_STORE}/admin/api/${SHOPIFY_API_VERSION}/orders.json?financial_status=paid&fulfillment_status=unfulfilled&status=open&limit=250`;
+  const response = await fetch(url, { headers: { "X-Shopify-Access-Token": accessToken } });
+  if (!response.ok) throw new Error(`Errore nel recupero ordini: ${response.status}`);
+  const data = await response.json();
+  return data.orders || [];
+}
+
+function formattaOrdine(ordine) {
+  const righe = [];
+  righe.push(`━━━━━━━━━━━━━━━━━━━━`);
+  righe.push(`ORDINE ${ordine.name}`);
+  righe.push(``);
+
+  for (const item of ordine.line_items || []) {
+    righe.push(`${item.quantity}x ${item.title}`);
+    for (const p of item.properties || []) {
+      if (!p.name || String(p.name).startsWith("_")) continue;
+      righe.push(`   ${p.name}: ${p.value}`);
+    }
+    righe.push(``);
+  }
+
+  const sp = ordine.shipping_address;
+  if (sp) {
+    righe.push(`SPEDIRE A:`);
+    righe.push(sp.name || "");
+    righe.push(sp.address1 || "");
+    if (sp.address2) righe.push(sp.address2);
+    righe.push(`${sp.zip || ""} ${sp.city || ""} ${sp.province_code || ""}`.trim());
+    righe.push(sp.country || "");
+    if (sp.phone) righe.push(`Tel: ${sp.phone}`);
+  } else {
+    righe.push(`⚠️ INDIRIZZO MANCANTE`);
+  }
+  righe.push(``);
+  return righe.join("\n");
+}
+
+app.get("/riepilogo-ordini", async (req, res) => {
+  if (req.query.token !== RIEPILOGO_TOKEN) {
+    return res.status(401).send("Non autorizzato");
+  }
+  res.status(200).send("ok");
+
+  try {
+    const ordini = await getOrdiniDaProdurre();
+
+    if (ordini.length === 0) {
+      console.log("ℹ️ Nessun ordine da produrre, nessuna email inviata");
+      return;
+    }
+
+    const testo = ordini.map(formattaOrdine).join("\n");
+    const oggi = new Date().toLocaleDateString("it-IT");
+
+    await fetch("https://api.resend.com/emails", {
+      method: "POST",
+      headers: { Authorization: `Bearer ${RESEND_API_KEY}`, "Content-Type": "application/json" },
+      body: JSON.stringify({
+        from: `${SENDER_NAME} <${SENDER_EMAIL}>`,
+        to: [SENDER_EMAIL],
+        subject: `📦 ${ordini.length} ordini da produrre — ${oggi}`,
+        html: `<p>Ordini pagati e non ancora spediti al ${oggi}.<br/>
+               Copia il blocco qui sotto e incollalo nel gruppo.</p>
+               <pre style="font-family: monospace; font-size: 14px; white-space: pre-wrap;">${testo
+                 .replace(/&/g, "&amp;")
+                 .replace(/</g, "&lt;")
+                 .replace(/>/g,
