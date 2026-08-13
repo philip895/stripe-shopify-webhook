@@ -559,12 +559,16 @@ app.get("/riepilogo-ordini", async (req, res) => {
     const ordini = await getOrdiniDaProdurre();
 
     if (ordini.length === 0) {
-      console.log("ℹ️ Nessun ordine da produrre, nessuna email inviata");
+      console.log("Nessun ordine da produrre, nessuna email inviata");
       return;
     }
 
     const testo = ordini.map(formattaOrdine).join("\n");
     const oggi = new Date().toLocaleDateString("it-IT");
+    const testoSicuro = testo
+      .split("&").join("&amp;")
+      .split("<").join("&lt;")
+      .split(">").join("&gt;");
 
     await fetch("https://api.resend.com/emails", {
       method: "POST",
@@ -572,10 +576,13 @@ app.get("/riepilogo-ordini", async (req, res) => {
       body: JSON.stringify({
         from: `${SENDER_NAME} <${SENDER_EMAIL}>`,
         to: [SENDER_EMAIL],
-        subject: `📦 ${ordini.length} ordini da produrre — ${oggi}`,
-        html: `<p>Ordini pagati e non ancora spediti al ${oggi}.<br/>
-               Copia il blocco qui sotto e incollalo nel gruppo.</p>
-               <pre style="font-family: monospace; font-size: 14px; white-space: pre-wrap;">${testo
-                 .replace(/&/g, "&amp;")
-                 .replace(/</g, "&lt;")
-                 .replace(/>/g,
+        subject: `Ordini da produrre (${ordini.length}) — ${oggi}`,
+        html: `<p>Ordini pagati e non ancora spediti al ${oggi}.<br/>Copia il blocco qui sotto e incollalo nel gruppo.</p><pre style="font-family: monospace; font-size: 14px; white-space: pre-wrap;">${testoSicuro}</pre>`,
+      }),
+    });
+
+    console.log(`Riepilogo inviato: ${ordini.length} ordini da produrre`);
+  } catch (err) {
+    console.error("Errore nel riepilogo ordini:", err.message);
+  }
+});
