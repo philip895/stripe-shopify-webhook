@@ -422,7 +422,7 @@ async function verifyPayPalWebhook(req, rawBody) {
 
 async function findPendingOrdersByAmount(amount, currency) {
   const accessToken = await getShopifyAccessToken();
-  const since = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+  const since = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
   const url = `https://${SHOPIFY_STORE}/admin/api/${SHOPIFY_API_VERSION}/orders.json?financial_status=pending&status=any&created_at_min=${encodeURIComponent(since)}&limit=250`;
   const response = await fetch(url, { headers: { "X-Shopify-Access-Token": accessToken } });
   if (!response.ok) throw new Error(`Errore ricerca ordini: ${response.status}`);
