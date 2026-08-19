@@ -476,12 +476,9 @@ console.log(`📨 Evento PayPal ricevuto: ${evento.event_type}`);
   const tipiValidi = ["PAYMENT.CAPTURE.COMPLETED", "PAYMENT.SALE.COMPLETED"];
   if (tipiValidi.indexOf(evento.event_type) === -1) return;
 
-  const amount = evento.resource?.amount?.value || evento.resource?.amount?.total;
-  const currency = evento.resource?.amount?.currency_code || evento.resource?.amount?.currency;
-  const payerEmail = evento.resource?.payer?.email_address || "";
-  const amount = evento.resource?.amount?.value;
-  const currency = evento.resource?.amount?.currency_code;
-  const payerEmail = evento.resource?.payer?.email_address || "";
+ const amount = evento.resource?.amount?.value || evento.resource?.amount?.total;
+    const currency = evento.resource?.amount?.currency_code || evento.resource?.amount?.currency;
+    const payerEmail = evento.resource?.payer?.email_address || "";
 
   console.log(`💶 Incasso PayPal: ${amount} ${currency} da ${payerEmail || "email non fornita"}`);
 
